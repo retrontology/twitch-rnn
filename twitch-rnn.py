@@ -1,9 +1,11 @@
 import tensorflow as tf
+from tensorflow._api.v2 import random
 from tensorflow.keras.layers.experimental import preprocessing
 
 import numpy as np
 import os
 import time
+import random
 
 import psycopg2
 from psycopg2 import sql
@@ -16,10 +18,11 @@ BUFFER_SIZE = 10000
 EMBEDDING_DIM = 256
 RNN_UNITS = 2048
 EPOCHS = 20
-TRAIN = True
+TRAIN = False
 DATASET_INFO = False
 CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), 'training_checkpoints')
-CHECKPOINT_FILE = None
+CHECKPOINT_FILE = os.path.join(CHECKPOINT_DIR, 'cp-0020.ckpt')
+#CHECKPOINT_FILE = None
 DB_NAME = ':)'
 DB_PORT = ':)'
 DB_HOST = ':)'
@@ -32,6 +35,7 @@ def main():
     model = NeuralRNN(vocab_size=ids_from_chars.vocabulary_size(), embedding_dim=EMBEDDING_DIM, rnn_units=RNN_UNITS)
     loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
     model.compile(optimizer='adam', loss=loss)
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(CHECKPOINT_DIR, 'cp-{epoch:04d}.ckpt'), save_weights_only=True, verbose=1)
 
     if CHECKPOINT_FILE:
         model.load_weights(CHECKPOINT_FILE)
@@ -40,13 +44,13 @@ def main():
         dataset = dataset_from_messages(load_messages(CHANNEL), ids_from_chars)
         if DATASET_INFO:
             dataset_info(model, dataset, loss)
-        train(model, dataset)
+        train(model, dataset, checkpoint_callback)
 
     one_step_model = OneStep(model, chars_from_ids, ids_from_chars)
 
     start = time.time()
     states = None
-    next_char = tf.constant(['KEKW'])
+    next_char = tf.constant([chr(random.randrange(65, 91))])
     result = [next_char]
 
     for n in range(500):
@@ -90,7 +94,7 @@ class OneStep(tf.keras.Model):
         predicted_logits = predicted_logits[:, -1, :]
         predicted_logits = predicted_logits/self.temperature
         # Apply the prediction mask: prevent "[UNK]" from being generated.
-        #predicted_logits = predicted_logits + self.prediction_mask
+        predicted_logits = predicted_logits + self.prediction_mask
 
         # Sample the output logits to generate token IDs.
         predicted_ids = tf.random.categorical(predicted_logits, num_samples=1)
@@ -133,7 +137,7 @@ def dataset_from_messages(messages, ids_from_chars):
         tensors.append(ids)
     dataset = tf.data.Dataset.from_tensor_slices(tensors)
     dataset = dataset.map(split_input_target)
-    dataset = dataset.shuffle(BUFFER_SIZE).batch(BATCH_SIZE, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
+    dataset = dataset.batch(BATCH_SIZE, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
     return dataset
 
 def dataset_info(model, dataset, loss):
@@ -145,11 +149,8 @@ def dataset_info(model, dataset, loss):
         print("Mean loss:        ", mean_loss)
         print(tf.exp(mean_loss).numpy())
 
-def train(model, dataset):
-    checkpoint_prefix = os.path.join(CHECKPOINT_DIR, "ckpt_{epoch}")
-    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(CHECKPOINT_DIR, 'cp-{epoch:04d}.ckpt'), save_weights_only=True, verbose=1)
-    history = model.fit(dataset, epochs=EPOCHS, callbacks=[checkpoint_callback])
-    return history
+def train(model: NeuralRNN, dataset, checkpoint_callback):
+    return model.fit(dataset, epochs=EPOCHS, callbacks=[checkpoint_callback])
 
 def load_messages(channel):
     connection = psycopg2.connect(f"dbname={DB_NAME} user={DB_USER} host={DB_HOST} port={DB_PORT} password={DB_PASS}")
