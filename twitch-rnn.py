@@ -8,16 +8,18 @@ import time
 import psycopg2
 from psycopg2 import sql
 
-CHANNEL = ':)'
-VOCAB_SIZE = 128
+CHANNEL = 'rlly'
+VOCAB = [chr(0), *(chr(x) for x in range(32, 127))]
 MAX_MESSAGE_LENGTH = 500
 BATCH_SIZE = 64
 BUFFER_SIZE = 10000
 EMBEDDING_DIM = 256
-RNN_UNITS = 1024
-EPOCHS = 200
+RNN_UNITS = 2048
+EPOCHS = 20
 TRAIN = True
 DATASET_INFO = False
+CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), 'training_checkpoints')
+CHECKPOINT_FILE = None
 DB_NAME = ':)'
 DB_PORT = ':)'
 DB_HOST = ':)'
@@ -26,17 +28,19 @@ DB_PASS = ':)'
 
 def main():
     ids_from_chars, chars_from_ids = setup_vocab()
-
-    dataset = dataset_from_messages(load_messages(CHANNEL), ids_from_chars)
     
-    model = NeuralRNN(vocab_size=VOCAB_SIZE, embedding_dim=EMBEDDING_DIM, rnn_units=RNN_UNITS)
+    model = NeuralRNN(vocab_size=ids_from_chars.vocabulary_size(), embedding_dim=EMBEDDING_DIM, rnn_units=RNN_UNITS)
     loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
+    model.compile(optimizer='adam', loss=loss)
 
-    if DATASET_INFO:
-        dataset_info(model, dataset, loss)
+    if CHECKPOINT_FILE:
+        model.load_weights(CHECKPOINT_FILE)
 
     if TRAIN:
-        train(model, dataset, loss)
+        dataset = dataset_from_messages(load_messages(CHANNEL), ids_from_chars)
+        if DATASET_INFO:
+            dataset_info(model, dataset, loss)
+        train(model, dataset)
 
     one_step_model = OneStep(model, chars_from_ids, ids_from_chars)
 
@@ -125,7 +129,7 @@ def dataset_from_messages(messages, ids_from_chars):
     tensors = []
     for message in messages:
         ids = ids_from_chars(tf.strings.unicode_split(message, 'UTF-8'))
-        ids = tf.pad(ids,[[0,MAX_MESSAGE_LENGTH-len(ids)]], 'CONSTANT')
+        ids = tf.pad(ids,[[0,MAX_MESSAGE_LENGTH-len(ids)]], 'CONSTANT', constant_values=ids_from_chars(chr(0)).numpy())
         tensors.append(ids)
     dataset = tf.data.Dataset.from_tensor_slices(tensors)
     dataset = dataset.map(split_input_target)
@@ -141,11 +145,9 @@ def dataset_info(model, dataset, loss):
         print("Mean loss:        ", mean_loss)
         print(tf.exp(mean_loss).numpy())
 
-def train(model, dataset, loss):
-    model.compile(optimizer='adam', loss=loss)
-    checkpoint_dir = os.path.join(os.path.dirname(__file__), 'training_checkpoints')
-    checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt_{epoch}")
-    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_prefix, save_weights_only=True)
+def train(model, dataset):
+    checkpoint_prefix = os.path.join(CHECKPOINT_DIR, "ckpt_{epoch}")
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(CHECKPOINT_DIR, 'cp-{epoch:04d}.ckpt'), save_weights_only=True, verbose=1)
     history = model.fit(dataset, epochs=EPOCHS, callbacks=[checkpoint_callback])
     return history
 
@@ -155,14 +157,15 @@ def load_messages(channel):
     cmd = sql.SQL('SELECT {} FROM {}.{} WHERE {} = {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal(channel))
     cursor.execute(cmd)
     messages = [x[0] for x in cursor.fetchall() if is_friendly(x[0])]
+    print(len(messages))
     connection.commit()
     cursor.close()
     connection.close()
     return messages
 
-def is_friendly(message):
+def is_friendly(message, vocab=VOCAB):
     for c in message:
-        if ord(c) >= 128:
+        if not c in vocab:
             return False
     return True
 
@@ -171,7 +174,7 @@ def split_input_target(sequence):
     target_text = sequence[1:]
     return input_text, target_text
 
-def setup_vocab(vocab=[chr(x) for x in range(VOCAB_SIZE)]):
+def setup_vocab(vocab=VOCAB):
     ids_from_chars = preprocessing.StringLookup(vocabulary=vocab, mask_token=None)
     chars_from_ids = preprocessing.StringLookup(vocabulary=ids_from_chars.get_vocabulary(), invert=True, mask_token=None)
     return ids_from_chars, chars_from_ids
