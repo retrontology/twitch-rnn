@@ -1,66 +1,39 @@
 import tensorflow as tf
-from tensorflow._api.v2 import random
-from tensorflow.keras.layers.experimental import preprocessing
 
-import numpy as np
 import os
-import time
 import random
 
-import psycopg2
-from psycopg2 import sql
+from create_dataset import *
 
-CHANNEL = 'rlly'
-VOCAB = [chr(0), *(chr(x) for x in range(32, 127))]
-MAX_MESSAGE_LENGTH = 500
-BATCH_SIZE = 64
-BUFFER_SIZE = 10000
+
 EMBEDDING_DIM = 256
 RNN_UNITS = 2048
-EPOCHS = 20
-TRAIN = False
-DATASET_INFO = False
+EPOCHS = 80
+TRAIN = True
 CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), 'training_checkpoints')
-CHECKPOINT_FILE = os.path.join(CHECKPOINT_DIR, 'cp-0020.ckpt')
-#CHECKPOINT_FILE = None
-DB_NAME = ':)'
-DB_PORT = ':)'
-DB_HOST = ':)'
-DB_USER = ':)'
-DB_PASS = ':)'
+#CHECKPOINT_FILE = os.path.join(CHECKPOINT_DIR, 'cp-0020.ckpt')
+CHECKPOINT_FILE = None
 
 def main():
     ids_from_chars, chars_from_ids = setup_vocab()
     
     model = NeuralRNN(vocab_size=ids_from_chars.vocabulary_size(), embedding_dim=EMBEDDING_DIM, rnn_units=RNN_UNITS)
     loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
-    model.compile(optimizer='adam', loss=loss)
-    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(CHECKPOINT_DIR, 'cp-{epoch:04d}.ckpt'), save_weights_only=True, verbose=1)
+    model.compile(optimizer='adam', loss=loss, metrics=['accuracy'])
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(CHECKPOINT_DIR, 'cp-best.ckpt'), save_weights_only=True, verbose=1, monitor='val_accuracy', save_best_only=True)
 
     if CHECKPOINT_FILE:
         model.load_weights(CHECKPOINT_FILE)
 
     if TRAIN:
-        dataset = dataset_from_messages(load_messages(CHANNEL), ids_from_chars)
-        if DATASET_INFO:
-            dataset_info(model, dataset, loss)
-        train(model, dataset, checkpoint_callback)
+        #dataset = tf.data.Dataset.from_generator(sql_dataset_generator, args=[ids_from_chars, BATCH_SIZE], output_signature=(tf.TensorSpec(shape=(499, ), dtype=tf.uint8), tf.TensorSpec(shape=(499, ), dtype=tf.uint8),)).prefetch(tf.data.experimental.AUTOTUNE)
+        model.fit(sql_channel_dataset_generator(ids_from_chars, channel=CHANNEL, batch_size=BATCH_SIZE), steps_per_epoch=int(get_channel_rows(CHANNEL)/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
+        #model.fit(dataset, steps_per_epoch=int(get_rows()/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
 
     one_step_model = OneStep(model, chars_from_ids, ids_from_chars)
 
-    start = time.time()
-    states = None
-    next_char = tf.constant([chr(random.randrange(65, 91))])
-    result = [next_char]
-
-    for n in range(500):
-        next_char, states = one_step_model.generate_one_step(next_char, states=states)
-        result.append(next_char)
-
-    result = tf.strings.join(result)
-    end = time.time()
-    print(result[0].numpy().decode('utf-8'), '\n\n' + '_'*80)
-    print('\nRun time:', end - start)
+    print(f'{generate_message(one_step_model, "@MajorEcho")}') #chr(random.randrange(65, 91))
+    
 
 class OneStep(tf.keras.Model):
     def __init__(self, model, chars_from_ids, ids_from_chars, temperature=1.0):
@@ -129,59 +102,23 @@ class NeuralRNN(tf.keras.Model):
         else:
             return x
 
-def dataset_from_messages(messages, ids_from_chars):
-    tensors = []
-    for message in messages:
-        ids = ids_from_chars(tf.strings.unicode_split(message, 'UTF-8'))
-        ids = tf.pad(ids,[[0,MAX_MESSAGE_LENGTH-len(ids)]], 'CONSTANT', constant_values=ids_from_chars(chr(0)).numpy())
-        tensors.append(ids)
-    dataset = tf.data.Dataset.from_tensor_slices(tensors)
-    dataset = dataset.map(split_input_target)
-    dataset = dataset.batch(BATCH_SIZE, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
-    return dataset
+def checkpoint_print_callback():
+    pass
 
-def dataset_info(model, dataset, loss):
-    for input_example_batch, target_example_batch in dataset.take(1):
-        example_batch_predictions = model(input_example_batch)
-        example_batch_loss = loss(target_example_batch, example_batch_predictions)
-        mean_loss = example_batch_loss.numpy().mean()
-        print("Prediction shape: ", example_batch_predictions.shape, " # (batch_size, sequence_length, vocab_size)")
-        print("Mean loss:        ", mean_loss)
-        print(tf.exp(mean_loss).numpy())
+def generate_message(one_step_model, seed):
+    states = None
+    next_char = tf.constant([seed])
+    result = [next_char]
 
-def train(model: NeuralRNN, dataset, checkpoint_callback):
-    return model.fit(dataset, epochs=EPOCHS, callbacks=[checkpoint_callback])
+    for n in range(500):
+        next_char, states = one_step_model.generate_one_step(next_char, states=states)
+        if next_char[0].numpy() == b'\x00':
+            break
+        else:
+            result.append(next_char)
 
-def load_messages(channel):
-    connection = psycopg2.connect(f"dbname={DB_NAME} user={DB_USER} host={DB_HOST} port={DB_PORT} password={DB_PASS}")
-    cursor = connection.cursor()
-    cmd = sql.SQL('SELECT {} FROM {}.{} WHERE {} = {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal(channel))
-    cursor.execute(cmd)
-    messages = [x[0] for x in cursor.fetchall() if is_friendly(x[0])]
-    print(len(messages))
-    connection.commit()
-    cursor.close()
-    connection.close()
-    return messages
-
-def is_friendly(message, vocab=VOCAB):
-    for c in message:
-        if not c in vocab:
-            return False
-    return True
-
-def split_input_target(sequence):
-    input_text = sequence[:-1]
-    target_text = sequence[1:]
-    return input_text, target_text
-
-def setup_vocab(vocab=VOCAB):
-    ids_from_chars = preprocessing.StringLookup(vocabulary=vocab, mask_token=None)
-    chars_from_ids = preprocessing.StringLookup(vocabulary=ids_from_chars.get_vocabulary(), invert=True, mask_token=None)
-    return ids_from_chars, chars_from_ids
-
-def text_from_ids(chars_from_ids, ids):
-  return tf.strings.reduce_join(chars_from_ids(ids), axis=-1)
+    result = tf.strings.join(result)
+    return result[0].numpy().decode('utf-8')
 
 if __name__ == '__main__':
     main()
