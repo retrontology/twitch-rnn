@@ -15,8 +15,8 @@ CHANNEL = 'rlly'
 MAX_MESSAGE_LENGTH = 500
 BATCH_SIZE = 128
 DATASET_INFO = False
-#SAVE_FILE = os.path.join(os.path.dirname(__file__), f'{CHANNEL}')
-SAVE_FILE = 'allchat'
+SAVE_FILE = os.path.join(os.path.dirname(__file__), f'{CHANNEL}')
+#SAVE_FILE = 'allchat'
 
 DB_NAME = ':)'
 DB_PORT = ':)'
@@ -37,7 +37,7 @@ def dataset_from_messages(messages, ids_from_chars):
         tensors.append(ids)
     dataset = tf.data.Dataset.from_tensor_slices(tensors)
     dataset = dataset.map(split_input_target)
-    dataset = dataset.batch(BATCH_SIZE, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE).repeat()
+    dataset = dataset.batch(BATCH_SIZE, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
     return dataset
 
 def dataset_info(model, dataset, loss):
@@ -132,7 +132,7 @@ def read_channel_dataset_from_file(path=SAVE_FILE, batch_size=BATCH_SIZE):
     dir = path
     prefix = os.path.basename(path)
     files = glob(os.path.join(dir, f'{prefix}-*.tfrecord'))
-    return tf.data.TFRecordDataset(files).map(decode_fn).batch(BATCH_SIZE, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE), len(files)
+    return tf.data.TFRecordDataset(files).map(decode_fn).batch(BATCH_SIZE, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE).repeat(), len(files)
 
 def setup_vocab(vocab=VOCAB):
     ids_from_chars = preprocessing.StringLookup(vocabulary=vocab, mask_token=None)
