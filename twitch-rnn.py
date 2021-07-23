@@ -8,7 +8,7 @@ from create_dataset import *
 
 EMBEDDING_DIM = 256
 RNN_UNITS = 2048
-EPOCHS = 80
+EPOCHS = 10
 TRAIN = True
 CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), 'training_checkpoints')
 #CHECKPOINT_FILE = os.path.join(CHECKPOINT_DIR, 'cp-0020.ckpt')
@@ -26,9 +26,10 @@ def main():
         model.load_weights(CHECKPOINT_FILE)
 
     if TRAIN:
-        #dataset = tf.data.Dataset.from_generator(sql_dataset_generator, args=[ids_from_chars, BATCH_SIZE], output_signature=(tf.TensorSpec(shape=(499, ), dtype=tf.uint8), tf.TensorSpec(shape=(499, ), dtype=tf.uint8),)).prefetch(tf.data.experimental.AUTOTUNE)
-        model.fit(sql_channel_dataset_generator(ids_from_chars, channel=CHANNEL, batch_size=BATCH_SIZE), steps_per_epoch=int(get_channel_rows(CHANNEL)/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
-        #model.fit(dataset, steps_per_epoch=int(get_rows()/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
+        #model.fit(sql_channel_dataset_generator(ids_from_chars, channel=CHANNEL, batch_size=BATCH_SIZE), steps_per_epoch=int(get_channel_rows(CHANNEL)/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
+        #model.fit(sql_dataset_generator(ids_from_chars, batch_size=BATCH_SIZE), steps_per_epoch=int(get_rows()/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
+        dataset, count = read_channel_dataset_from_file()
+        model.fit(dataset, steps_per_epoch=int(count/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
 
     one_step_model = OneStep(model, chars_from_ids, ids_from_chars)
 
