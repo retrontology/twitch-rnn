@@ -37,7 +37,7 @@ def dataset_from_messages(messages, ids_from_chars):
         tensors.append(ids)
     dataset = tf.data.Dataset.from_tensor_slices(tensors)
     dataset = dataset.map(split_input_target)
-    dataset = dataset.batch(BATCH_SIZE, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
+    dataset = dataset.batch(BATCH_SIZE, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE).repeat()
     return dataset
 
 def dataset_info(model, dataset, loss):
@@ -132,7 +132,7 @@ def read_channel_dataset_from_file(path=SAVE_FILE, batch_size=BATCH_SIZE):
     dir = path
     prefix = os.path.basename(path)
     files = glob(os.path.join(dir, f'{prefix}-*.tfrecord'))
-    return tf.data.TFRecordDataset(files).map(decode_fn).batch(BATCH_SIZE).prefetch(tf.data.experimental.AUTOTUNE), len(files)
+    return tf.data.TFRecordDataset(files).map(decode_fn).batch(BATCH_SIZE, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE), len(files)
 
 def setup_vocab(vocab=VOCAB):
     ids_from_chars = preprocessing.StringLookup(vocabulary=vocab, mask_token=None)
