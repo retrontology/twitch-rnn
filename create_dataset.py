@@ -1,4 +1,3 @@
-from posixpath import split
 import tensorflow as tf
 from tensorflow.keras.layers.experimental import preprocessing
 

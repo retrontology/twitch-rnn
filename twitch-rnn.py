@@ -20,7 +20,7 @@ def main():
     model = NeuralRNN(vocab_size=ids_from_chars.vocabulary_size(), embedding_dim=EMBEDDING_DIM, rnn_units=RNN_UNITS)
     loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
     model.compile(optimizer='adam', loss=loss, metrics=['accuracy'])
-    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(CHECKPOINT_DIR, 'cp-best.ckpt'), save_weights_only=True, verbose=1, monitor='val_accuracy', save_best_only=True)
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(CHECKPOINT_DIR, f'{os.path.basename(SAVE_FILE)}.cpkt'), save_weights_only=True, verbose=1, monitor='accuracy', save_best_only=True)
 
     if CHECKPOINT_FILE:
         model.load_weights(CHECKPOINT_FILE)
