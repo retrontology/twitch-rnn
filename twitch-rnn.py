@@ -8,11 +8,11 @@ from create_dataset import *
 
 EMBEDDING_DIM = 256
 RNN_UNITS = 2048
-EPOCHS = 10
+EPOCHS = 100
 TRAIN = True
 CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), 'training_checkpoints')
-#CHECKPOINT_FILE = os.path.join(CHECKPOINT_DIR, 'cp-0020.ckpt')
-CHECKPOINT_FILE = None
+CHECKPOINT_FILE = os.path.join(CHECKPOINT_DIR, f'{os.path.basename(SAVE_FILE)}.cpkt')
+#CHECKPOINT_FILE = None
 
 def main():
     ids_from_chars, chars_from_ids = setup_vocab()
@@ -22,7 +22,7 @@ def main():
     model.compile(optimizer='adam', loss=loss, metrics=['accuracy'])
     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(CHECKPOINT_DIR, f'{os.path.basename(SAVE_FILE)}.cpkt'), save_weights_only=True, verbose=1, monitor='accuracy', save_best_only=True)
 
-    if CHECKPOINT_FILE:
+    if CHECKPOINT_FILE and os.path.exists(CHECKPOINT_FILE):
         model.load_weights(CHECKPOINT_FILE)
 
     if TRAIN:

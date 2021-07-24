@@ -1,9 +1,11 @@
+import multiprocessing
 import tensorflow as tf
 from tensorflow.keras.layers.experimental import preprocessing
 
 import numpy as np
 import os
 from glob import glob
+from multiprocessing import Pool, cpu_count
 
 import psycopg2
 from psycopg2 import sql
@@ -14,8 +16,9 @@ CHANNEL = 'rlly'
 MAX_MESSAGE_LENGTH = 500
 BATCH_SIZE = 128
 DATASET_INFO = False
-SAVE_FILE = os.path.join(os.path.dirname(__file__), f'{CHANNEL}')
-#SAVE_FILE = 'allchat'
+#SAVE_FILE = os.path.join(os.path.dirname(__file__), f'{CHANNEL}')
+SAVE_FILE = 'allchat'
+SQL_PAGE_SIZE = 1024
 
 DB_NAME = ':)'
 DB_PORT = ':)'
@@ -66,7 +69,7 @@ def get_channel_rows(channel=CHANNEL):
 def get_rows():
     connection = psycopg2.connect(f"dbname={DB_NAME} user={DB_USER} host={DB_HOST} port={DB_PORT} password={DB_PASS}")
     cursor = connection.cursor()
-    cmd = sql.SQL('SELECT COUNT({}) FROM {}.{} WHERE {} != {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal('xQcOW'))
+    cmd = sql.SQL('SELECT COUNT({}) FROM {}.{} WHERE {} != {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal('xqcow'))
     cursor.execute(cmd)
     rows = cursor.fetchall()[0][0]
     connection.commit()
@@ -88,7 +91,7 @@ def get_all_channel_messages_from_sql(channel=CHANNEL):
 def get_all_messages_from_sql():
     connection = psycopg2.connect(f"dbname={DB_NAME} user={DB_USER} host={DB_HOST} port={DB_PORT} password={DB_PASS}")
     cursor = connection.cursor()
-    cmd = sql.SQL('SELECT {} FROM {}.{} WHERE {} != {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal('xQcOW'))
+    cmd = sql.SQL('SELECT {} FROM {}.{} WHERE {} != {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal('xqcow'))
     cursor.execute(cmd)
     messages = [x[0] for x in cursor.fetchall() if is_friendly(x[0])]
     connection.commit()
@@ -107,10 +110,10 @@ def get_select_channel_messages_from_sql(channel=CHANNEL, batch_size=BATCH_SIZE,
     connection.close()
     return messages
 
-def get_select_messages_from_sql(batch_size=BATCH_SIZE, offset=0):
+def get_select_messages_from_sql(batch_size=SQL_PAGE_SIZE, offset=0):
     connection = psycopg2.connect(f"dbname={DB_NAME} user={DB_USER} host={DB_HOST} port={DB_PORT} password={DB_PASS}")
     cursor = connection.cursor()
-    cmd = sql.SQL('SELECT {} FROM {}.{} WHERE {} != {} LIMIT {} OFFSET {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal('xQcOW'), sql.Literal(batch_size), sql.Literal(offset))
+    cmd = sql.SQL('SELECT {} FROM {}.{} WHERE {} != {} LIMIT {} OFFSET {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal('xqcow'), sql.Literal(batch_size), sql.Literal(offset))
     cursor.execute(cmd)
     messages = [x[0] for x in cursor.fetchall() if is_friendly(x[0])]
     connection.commit()
@@ -205,34 +208,45 @@ def write_channel_messages_to_file(ids_from_chars, channel=CHANNEL, path=SAVE_FI
         progress.add(1)
     file_writer.close()
 
-def write_all_messages_to_file(ids_from_chars, path=SAVE_FILE):
-    messages = get_all_messages_from_sql()
+def write_all_messages_to_file(ids_from_chars, path=SAVE_FILE, sql_page_size=SQL_PAGE_SIZE):
     path = os.path.abspath(path)
     if os.path.exists(path):
         exit('Save file already exists!')
     else:
         os.mkdir(path)
-    zero_pad = len(str(len(messages)))
+    sql_rows = get_rows()
+    zero_pad = len(str(sql_rows))
     dir = path
     prefix = os.path.basename(path)
-    progress = tf.keras.utils.Progbar(len(messages), unit_name='message')
+    progress = tf.keras.utils.Progbar(None, unit_name='message')
     index = 0
-    for message in messages:
-        if is_friendly(message):
-            path = os.path.join(dir, f'{prefix}-{str(index).zfill(zero_pad)}.tfrecord')
-            file_writer = tf.io.TFRecordWriter(path) 
-            ids = ids_from_chars(tf.strings.unicode_split(message, 'UTF-8'))
-            ids = tf.pad(ids,[[0,MAX_MESSAGE_LENGTH-len(ids)]], 'CONSTANT', constant_values=ids_from_chars(chr(0)).numpy())
-            x, y = split_input_target(ids)
-            example = tf.train.Example(features=tf.train.Features(feature={
-            'x': tf.train.Feature(int64_list=tf.train.Int64List(value=x.numpy())), 
-            'y': tf.train.Feature(int64_list=tf.train.Int64List(value=y.numpy()))}))
-            file_writer.write(example.SerializeToString())
-            file_writer.close()
-            index += 1
-        progress.add(1)
-    file_writer.close()
-    
+    sql_offset = 0
 
+    def progress_callback(x):
+        progress.add(1)
+    with Pool(processes=cpu_count()) as pool:
+        while sql_offset + sql_page_size < sql_rows:
+            messages = get_select_messages_from_sql(sql_page_size, sql_offset)
+            for message in messages:
+                if is_friendly(message):
+                    pool.apply_async(write_message_to_file, (message, dir, prefix, index, zero_pad), callback=progress_callback)
+                    index += 1
+            sql_offset += sql_page_size
+        pool.close()
+        pool.join()
+    progress.update(progress._last_update, finalize=True)
+
+def write_message_to_file(message, dir, prefix, index, zero_pad):
+    ids_from_chars, chars_from_ids = setup_vocab()
+    path = os.path.join(dir, f'{prefix}-{str(index).zfill(zero_pad)}.tfrecord')
+    with tf.io.TFRecordWriter(path) as file_writer:
+        ids = ids_from_chars(tf.strings.unicode_split(message, 'UTF-8'))
+        ids = tf.pad(ids,[[0,MAX_MESSAGE_LENGTH-len(ids)]], 'CONSTANT', constant_values=ids_from_chars(chr(0)).numpy())
+        x, y = split_input_target(ids)
+        example = tf.train.Example(features=tf.train.Features(feature={
+        'x': tf.train.Feature(int64_list=tf.train.Int64List(value=x.numpy())), 
+        'y': tf.train.Feature(int64_list=tf.train.Int64List(value=y.numpy()))}))
+        file_writer.write(example.SerializeToString())
+    
 if __name__ == "__main__":
     main()
