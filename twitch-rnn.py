@@ -6,13 +6,13 @@ import random
 from create_dataset import *
 
 
-EMBEDDING_DIM = 256
-RNN_UNITS = 2048
-EPOCHS = 100
+EMBEDDING_DIM = 25
+RNN_UNITS = 500
+EPOCHS = 500
 TRAIN = True
 CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), 'training_checkpoints')
-CHECKPOINT_FILE = os.path.join(CHECKPOINT_DIR, f'{os.path.basename(SAVE_FILE)}.cpkt')
-#CHECKPOINT_FILE = None
+#CHECKPOINT_FILE = os.path.join(CHECKPOINT_DIR, f'{os.path.basename(SAVE_FILE)}.cpkt')
+CHECKPOINT_FILE = None
 
 def main():
     ids_from_chars, chars_from_ids = setup_vocab()
@@ -22,18 +22,23 @@ def main():
     model.compile(optimizer='adam', loss=loss, metrics=['accuracy'])
     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(CHECKPOINT_DIR, f'{os.path.basename(SAVE_FILE)}.cpkt'), save_weights_only=True, verbose=1, monitor='accuracy', save_best_only=True)
 
-    if CHECKPOINT_FILE and os.path.exists(CHECKPOINT_FILE):
+    if not os.path.isdir(SAVE_FILE):
+        write_channel_messages_to_file(ids_from_chars)
+
+    if CHECKPOINT_FILE : #and os.path.exists(CHECKPOINT_FILE)
+        print(f'Loading checkpoint from {CHECKPOINT_FILE}')
         model.load_weights(CHECKPOINT_FILE)
 
     if TRAIN:
         #model.fit(sql_channel_dataset_generator(ids_from_chars, channel=CHANNEL, batch_size=BATCH_SIZE), steps_per_epoch=int(get_channel_rows(CHANNEL)/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
         #model.fit(sql_dataset_generator(ids_from_chars, batch_size=BATCH_SIZE), steps_per_epoch=int(get_rows()/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
-        dataset, count = read_channel_dataset_from_file()
+        dataset, count = read_dataset_from_file()
         model.fit(dataset, steps_per_epoch=int(count/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
 
     one_step_model = OneStep(model, chars_from_ids, ids_from_chars)
 
-    print(f'{generate_message(one_step_model, "@MajorEcho")}') #chr(random.randrange(65, 91))
+    for i in range(20):
+        print(f'{generate_message(one_step_model, "@MajorEcho")}') #chr(random.randrange(65, 91))
     
 
 class OneStep(tf.keras.Model):

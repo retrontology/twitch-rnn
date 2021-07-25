@@ -11,13 +11,15 @@ import psycopg2
 from psycopg2 import sql
 from tensorflow.python.ops.gen_batch_ops import batch
 
+import emoji
+
 VOCAB = [chr(0), *(chr(x) for x in range(32, 127))]
-CHANNEL = 'rlly'
+CHANNEL = 'roxmiral'
 MAX_MESSAGE_LENGTH = 500
 BATCH_SIZE = 128
 DATASET_INFO = False
-#SAVE_FILE = os.path.join(os.path.dirname(__file__), f'{CHANNEL}')
-SAVE_FILE = 'allchat'
+SAVE_FILE = os.path.join(os.path.dirname(__file__), f'{CHANNEL}')
+#SAVE_FILE = 'allchat'
 SQL_PAGE_SIZE = 1024
 
 DB_NAME = ':)'
@@ -28,7 +30,8 @@ DB_PASS = ':)'
 
 def main():
     ids_from_chars, chars_from_ids = setup_vocab()
-    write_all_messages_to_file(ids_from_chars)
+    #write_channel_messages_to_file(ids_from_chars, CHANNEL, SAVE_FILE)
+    write_all_messages_to_file()
 
 def dataset_from_messages(messages, ids_from_chars):
     tensors = []
@@ -82,7 +85,7 @@ def get_all_channel_messages_from_sql(channel=CHANNEL):
     cursor = connection.cursor()
     cmd = sql.SQL('SELECT {} FROM {}.{} WHERE {} = {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal(channel))
     cursor.execute(cmd)
-    messages = [x[0] for x in cursor.fetchall() if is_friendly(x[0])]
+    messages = [emoji.demojize(x[0]) for x in cursor.fetchall() if is_friendly(x[0])]
     connection.commit()
     cursor.close()
     connection.close()
@@ -93,7 +96,7 @@ def get_all_messages_from_sql():
     cursor = connection.cursor()
     cmd = sql.SQL('SELECT {} FROM {}.{} WHERE {} != {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal('xqcow'))
     cursor.execute(cmd)
-    messages = [x[0] for x in cursor.fetchall() if is_friendly(x[0])]
+    messages = [emoji.demojize(x[0]) for x in cursor.fetchall() if is_friendly(x[0])]
     connection.commit()
     cursor.close()
     connection.close()
@@ -104,7 +107,7 @@ def get_select_channel_messages_from_sql(channel=CHANNEL, batch_size=BATCH_SIZE,
     cursor = connection.cursor()
     cmd = sql.SQL('SELECT {} FROM {}.{} WHERE {} = {} LIMIT {} OFFSET {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal(channel), sql.Literal(batch_size), sql.Literal(offset))
     cursor.execute(cmd)
-    messages = [x[0] for x in cursor.fetchall() if is_friendly(x[0])]
+    messages = [emoji.demojize(x[0]) for x in cursor.fetchall() if is_friendly(x[0])]
     connection.commit()
     cursor.close()
     connection.close()
@@ -115,7 +118,7 @@ def get_select_messages_from_sql(batch_size=SQL_PAGE_SIZE, offset=0):
     cursor = connection.cursor()
     cmd = sql.SQL('SELECT {} FROM {}.{} WHERE {} != {} LIMIT {} OFFSET {};').format(sql.Identifier('content'), sql.Identifier(f'twitchlogger'), sql.Identifier(f'chat'), sql.Identifier('channel'), sql.Literal('xqcow'), sql.Literal(batch_size), sql.Literal(offset))
     cursor.execute(cmd)
-    messages = [x[0] for x in cursor.fetchall() if is_friendly(x[0])]
+    messages = [emoji.demojize(x[0]) for x in cursor.fetchall() if is_friendly(x[0])]
     connection.commit()
     cursor.close()
     connection.close()
@@ -127,7 +130,7 @@ def is_friendly(message, vocab=VOCAB):
             return False
     return True
 
-def read_channel_dataset_from_file(path=SAVE_FILE, batch_size=BATCH_SIZE):
+def read_dataset_from_file(path=SAVE_FILE, batch_size=BATCH_SIZE):
     path = os.path.abspath(path)
     if not os.path.exists(path):
         exit('Save directory not found!')
@@ -208,7 +211,7 @@ def write_channel_messages_to_file(ids_from_chars, channel=CHANNEL, path=SAVE_FI
         progress.add(1)
     file_writer.close()
 
-def write_all_messages_to_file(ids_from_chars, path=SAVE_FILE, sql_page_size=SQL_PAGE_SIZE):
+def write_all_messages_to_file(path=SAVE_FILE, sql_page_size=SQL_PAGE_SIZE):
     path = os.path.abspath(path)
     if os.path.exists(path):
         exit('Save file already exists!')
@@ -221,9 +224,7 @@ def write_all_messages_to_file(ids_from_chars, path=SAVE_FILE, sql_page_size=SQL
     progress = tf.keras.utils.Progbar(None, unit_name='message')
     index = 0
     sql_offset = 0
-
-    def progress_callback(x):
-        progress.add(1)
+    def progress_callback(x): progress.add(1)
     with Pool(processes=cpu_count()) as pool:
         while sql_offset + sql_page_size < sql_rows:
             messages = get_select_messages_from_sql(sql_page_size, sql_offset)
