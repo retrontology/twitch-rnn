@@ -126,7 +126,7 @@ def get_select_messages_from_sql(batch_size=SQL_PAGE_SIZE, offset=0):
     return messages
 
 def is_friendly(message, vocab=VOCAB):
-    for c in message:
+    for c in set(message):
         if not c in vocab:
             return False
     return True
@@ -220,21 +220,22 @@ def write_all_messages_to_file(path=SAVE_FILE, sql_page_size=SQL_PAGE_SIZE, num_
     progress = tf.keras.utils.Progbar(None, unit_name='message')
     file_index = 0
     sql_offset = 0
+    next_messages = get_select_messages_from_sql(sql_page_size, sql_offset)
 
     def progress_callback():
         progress.add(1)
 
     while sql_offset + sql_page_size < sql_rows:
-        messages = get_select_messages_from_sql(sql_page_size, sql_offset)
+        messages = next_messages
         pool = ThreadPool(8)
         for message in messages:
             if is_friendly(message):
                 pool.apply(func=write_message_to_file, args=(message, dir, prefix, file_index, zero_pad, progress_callback))
                 file_index += 1
+        sql_offset += sql_page_size
+        next_messages = get_select_messages_from_sql(sql_page_size, sql_offset)
         pool.close()
         pool.join()
-        del messages
-        sql_offset += sql_page_size
     progress.update(progress._last_update, finalize=True)
 
 def write_message_to_file(message, dir, prefix, index, zero_pad, callback):
