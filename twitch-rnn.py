@@ -15,34 +15,36 @@ CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), 'training_checkpoints')
 CHECKPOINT_FILE = None
 
 def main():
-    ids_from_chars, chars_from_ids = setup_vocab()
+
+    if not os.path.isdir(SAVE_FILE):
+        if SAVE_FILE == "allchat":
+            write_all_messages_to_file()
+        else:
+            write_channel_messages_to_file(IDS_FROM_CHARS)
+    dataset, count = read_dataset_from_file()
     
-    model = NeuralRNN(vocab_size=ids_from_chars.vocabulary_size(), embedding_dim=EMBEDDING_DIM, rnn_units=RNN_UNITS)
+    model = NeuralRNN(vocab_size=IDS_FROM_CHARS.vocabulary_size(), embedding_dim=EMBEDDING_DIM, rnn_units=RNN_UNITS)
     loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
     model.compile(optimizer='adam', loss=loss, metrics=['accuracy'])
     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(CHECKPOINT_DIR, f'{os.path.basename(SAVE_FILE)}.cpkt'), save_weights_only=True, verbose=1, monitor='accuracy', save_best_only=True)
-
-    if not os.path.isdir(SAVE_FILE):
-        write_channel_messages_to_file(ids_from_chars)
 
     if CHECKPOINT_FILE : #and os.path.exists(CHECKPOINT_FILE)
         print(f'Loading checkpoint from {CHECKPOINT_FILE}')
         model.load_weights(CHECKPOINT_FILE)
 
     if TRAIN:
-        #model.fit(sql_channel_dataset_generator(ids_from_chars, channel=CHANNEL, batch_size=BATCH_SIZE), steps_per_epoch=int(get_channel_rows(CHANNEL)/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
-        #model.fit(sql_dataset_generator(ids_from_chars, batch_size=BATCH_SIZE), steps_per_epoch=int(get_rows()/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
-        dataset, count = read_dataset_from_file()
+        #model.fit(sql_channel_dataset_generator(IDS_FROM_CHARS, channel=CHANNEL, batch_size=BATCH_SIZE), steps_per_epoch=int(get_channel_rows(CHANNEL)/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
+        #model.fit(sql_dataset_generator(IDS_FROM_CHARS, batch_size=BATCH_SIZE), steps_per_epoch=int(get_rows()/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
         model.fit(dataset, steps_per_epoch=int(count/BATCH_SIZE), epochs=EPOCHS, callbacks=[checkpoint_callback])
 
-    one_step_model = OneStep(model, chars_from_ids, ids_from_chars)
+    one_step_model = OneStep(model, IDS_FROM_CHARS, CHARS_FROM_IDS)
 
     for i in range(20):
         print(f'{generate_message(one_step_model, "@MajorEcho")}') #chr(random.randrange(65, 91))
     
 
 class OneStep(tf.keras.Model):
-    def __init__(self, model, chars_from_ids, ids_from_chars, temperature=1.0):
+    def __init__(self, model, ids_from_chars, chars_from_ids, temperature=1.0):
         super().__init__()
         self.temperature = temperature
         self.model = model
@@ -89,18 +91,23 @@ class NeuralRNN(tf.keras.Model):
 
     def __init__(self, vocab_size, embedding_dim, rnn_units):
         super().__init__(self)
+        self.vocab_size = vocab_size
         self.embedding = tf.keras.layers.Embedding(vocab_size, embedding_dim)
-        self.gru = tf.keras.layers.GRU(rnn_units,
+        self.lstm = tf.keras.layers.LSTM(rnn_units,
                                     return_sequences=True,
-                                    return_state=True)
+                                    return_state=True,
+                                    dropout=0.2)
         self.dense = tf.keras.layers.Dense(vocab_size)
 
     def call(self, inputs, states=None, return_state=False, training=False):
         x = inputs
         x = self.embedding(x, training=training)
+        x = tf.reshape(x, [-1, self.vocab_size])
         if states is None:
-            states = self.gru.get_initial_state(x)
-        x, states = self.gru(x, initial_state=states, training=training)
+            states = self.lstm.get_initial_state(x)
+        #x, states = self.lstm(x, initial_state=states, training=training)
+        print(self.lstm(x, initial_state=states, training=training))
+
         x = self.dense(x, training=training)
 
         if return_state:
