@@ -20,7 +20,7 @@ def main():
         if SAVE_FILE == "allchat":
             write_all_messages_to_file()
         else:
-            write_channel_messages_to_file(IDS_FROM_CHARS)
+            write_channel_messages_to_file()
     dataset, count = read_dataset_from_file()
     
     model = NeuralRNN(vocab_size=IDS_FROM_CHARS.vocabulary_size(), embedding_dim=EMBEDDING_DIM, rnn_units=RNN_UNITS)
@@ -93,20 +93,19 @@ class NeuralRNN(tf.keras.Model):
         super().__init__(self)
         self.vocab_size = vocab_size
         self.embedding = tf.keras.layers.Embedding(vocab_size, embedding_dim)
-        self.lstm = tf.keras.layers.LSTM(rnn_units,
-                                    return_sequences=True,
-                                    return_state=True,
-                                    dropout=0.2)
+        self.gru1 = tf.keras.layers.GRU(rnn_units,
+                                   return_sequences=True,
+                                   return_state=True)
         self.dense = tf.keras.layers.Dense(vocab_size)
 
     def call(self, inputs, states=None, return_state=False, training=False):
         x = inputs
         x = self.embedding(x, training=training)
-        x = tf.reshape(x, [-1, self.vocab_size])
+        #x = tf.reshape(x, [-1, self.vocab_size])
         if states is None:
-            states = self.lstm.get_initial_state(x)
+            states = self.gru1.get_initial_state(x)
         #x, states = self.lstm(x, initial_state=states, training=training)
-        print(self.lstm(x, initial_state=states, training=training))
+        x, states = self.gru1(x, initial_state=states, training=training)
 
         x = self.dense(x, training=training)
 
@@ -123,7 +122,7 @@ def generate_message(one_step_model, seed):
     next_char = tf.constant([seed])
     result = [next_char]
 
-    for n in range(500):
+    for n in range(MAX_MESSAGE_LENGTH-len(result)):
         next_char, states = one_step_model.generate_one_step(next_char, states=states)
         if next_char[0].numpy() == b'\x00':
             break

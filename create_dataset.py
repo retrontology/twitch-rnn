@@ -11,6 +11,7 @@ from psycopg2 import sql
 import emoji
 
 from multiprocessing.pool import ThreadPool
+from multiprocessing import cpu_count
 
 VOCAB = [chr(0), *(chr(x) for x in range(32, 127))]
 IDS_FROM_CHARS = preprocessing.StringLookup(vocabulary=VOCAB, mask_token=None)
@@ -20,8 +21,8 @@ CHANNEL = 'rlly'
 MAX_MESSAGE_LENGTH = 500
 BATCH_SIZE = 128
 DATASET_INFO = False
-#SAVE_FILE = os.path.join(os.path.dirname(__file__), f'{CHANNEL}')
-SAVE_FILE = 'allchat'
+SAVE_FILE = os.path.join(os.path.dirname(__file__), f'{CHANNEL}')
+#SAVE_FILE = 'allchat'
 SQL_PAGE_SIZE = 1024
 
 DB_NAME = ':)'
@@ -227,7 +228,7 @@ def write_all_messages_to_file(path=SAVE_FILE, sql_page_size=SQL_PAGE_SIZE, num_
 
     while sql_offset + sql_page_size < sql_rows:
         messages = next_messages
-        pool = ThreadPool(8)
+        pool = ThreadPool(cpu_count())
         for message in messages:
             if is_friendly(message):
                 pool.apply(func=write_message_to_file, args=(message, dir, prefix, file_index, zero_pad, progress_callback))
